@@ -20,7 +20,6 @@ var TOKEN = '';
 
 var socket;
 var last_state;
-var last_outputs;
 var current_app;
 var pagination = 0;
 var browsepath = '';
@@ -340,6 +339,8 @@ function webSocketConnect() {
                         $('#salamisandwich > tbody').append(
                             '<tr trackid="' +
                                 obj.data[song].id +
+                                '" queuepos="' +
+                                obj.data[song].pos +
                                 '"><td>' +
                                 (obj.data[song].pos + 1) +
                                 '</td>' +
@@ -369,7 +370,15 @@ function webSocketConnect() {
                     )
                         $('#next').removeClass('hide');
                     if (pagination > 0) $('#prev').removeClass('hide');
-                    // Queue deletion controls are disabled for continuous radio.
+                    $('#salamisandwich > tbody > tr > td:last-child').append(
+                        '<a class="queue-trash pull-right" href="#" title="Remove selected queue range">' +
+                            '<span class="glyphicon glyphicon-trash"></span></a>'
+                    );
+                    $('#salamisandwich > tbody a.queue-trash').on('click', function (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        trash($(this).closest('tr'));
+                    });
 
                     $('#salamisandwich > tbody > tr').on({
                         click: function () {
@@ -396,6 +405,7 @@ function webSocketConnect() {
                     $('#salamisandwich > tbody')
                         .sortable({
                             helper: fixHelperModified,
+                            cancel: 'a.queue-trash',
                             stop: function (event, ui) {
                                 renumber_table('#salamisandwich', ui.item);
                             },
@@ -764,36 +774,6 @@ function webSocketConnect() {
 
                     last_state = obj;
                     break;
-                case 'outputnames':
-                    $('#btn-outputs-block button').remove();
-                    if (Object.keys(obj.data).length) {
-                        $.each(obj.data, function (id, name) {
-                            var btn = $(
-                                '<button id="btnoutput' +
-                                    id +
-                                    '" class="btn btn-default" onclick="toggleoutput(this, ' +
-                                    id +
-                                    ')"><span class="glyphicon glyphicon-volume-up"></span> ' +
-                                    name +
-                                    '</button>'
-                            );
-                            btn.appendTo($('#btn-outputs-block'));
-                        });
-                    } else {
-                        $('#btn-outputs-block').addClass('hide');
-                    }
-                    /* remove cache, since the buttons have been recreated */
-                    last_outputs = '';
-                    break;
-                case 'outputs':
-                    if (JSON.stringify(obj) === JSON.stringify(last_outputs))
-                        break;
-                    $.each(obj.data, function (id, enabled) {
-                        if (enabled) $('#btnoutput' + id).addClass('active');
-                        else $('#btnoutput' + id).removeClass('active');
-                    });
-                    last_outputs = obj;
-                    break;
                 case 'channels':
                     scrobbler = '';
                     $('#love').addClass('hide');
@@ -897,8 +877,6 @@ function webSocketConnect() {
 
                 case 'authorized':
                     if (obj.data === 'true') {
-                        /* emit initial request for output names */
-                        socket.send('MPD_API_GET_OUTPUTS');
                         socket.send('MPD_API_GET_CHANNELS');
                     } else webSocketAuthenticate();
 
@@ -1062,15 +1040,14 @@ function setLocalStream(mpdhost) {
 }
 
 function trash(tr) {
+    var position = parseInt(tr.attr('queuepos'), 10);
+    if (isNaN(position)) return;
     if ($('#btntrashmodeup').hasClass('active')) {
-        socket.send('MPD_API_RM_RANGE,0,' + (tr.index() + 1));
-        tr.remove();
+        socket.send('MPD_API_RM_RANGE,0,' + (position + 1));
     } else if ($('#btntrashmodesingle').hasClass('active')) {
         socket.send('MPD_API_RM_TRACK,' + tr.attr('trackid'));
-        tr.remove();
     } else if ($('#btntrashmodedown').hasClass('active')) {
-        socket.send('MPD_API_RM_RANGE,' + tr.index() + ',-1');
-        tr.remove();
+        socket.send('MPD_API_RM_RANGE,' + position + ',-1');
     }
 }
 
@@ -1124,15 +1101,6 @@ $('#btnrepeat').on('click', function (e) {
         'MPD_API_TOGGLE_REPEAT,' + ($(this).hasClass('active') ? 0 : 1)
     );
 });
-
-function toggleoutput(button, id) {
-    socket.send(
-        'MPD_API_TOGGLE_OUTPUT,' +
-            id +
-            ',' +
-            ($(button).hasClass('active') ? 0 : 1)
-    );
-}
 
 $('#trashmode')
     .children('button')

@@ -187,17 +187,40 @@
               <!-- Repeat would prevent new random tracks from entering rotation. -->
             </div>
             <div
-              id="btn-outputs-block"
+              id="trashmode"
               class="btn-group-vertical btn-block btn-group-lg"
-            ></div>
-
-            <!-- Queue deletion could remove the playing stream. -->
+              data-toggle="radio"
+            >
+              <button id="btntrashmodeup" type="button" class="btn btn-default" title="Remove this song and all songs above it">
+                <span class="glyphicon glyphicon-chevron-up"></span>
+                <span class="glyphicon glyphicon-trash"></span> <span>Up</span>
+              </button>
+              <button
+                id="btntrashmodesingle"
+                type="button"
+                class="btn btn-default active"
+                title="Remove only the selected song"
+              >
+                <span class="glyphicon glyphicon-star-empty"></span>
+                <span class="glyphicon glyphicon-trash"></span> <span>Single</span>
+              </button>
+              <button id="btntrashmodedown" type="button" class="btn btn-default" title="Remove this song and all songs below it">
+                <span class="glyphicon glyphicon-chevron-down"></span>
+                <span class="glyphicon glyphicon-trash"></span> <span>Down</span>
+              </button>
+            </div>
 
             <div
               id="btn-responsive-block"
               class="btn-group-vertical btn-block btn-group-lg"
             >
-              <!-- Clearing the queue would silence the radio. -->
+              <button
+                type="button"
+                class="btn btn-default"
+                onclick="socket.send('MPD_API_RM_ALL');"
+              >
+                <span class="glyphicon glyphicon-trash"></span> Clear Queue
+              </button>
               <a
                 href="#"
                 data-toggle="modal"

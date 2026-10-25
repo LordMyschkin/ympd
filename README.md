@@ -329,6 +329,11 @@ Gruppen nach MPD-Tags auswählen. Weitere Felder steuern den Queue-Puffer,
 Inline- und YAML-Ausschlussregeln, eine URI-Datei sowie die erweiterten
 Ashuffle-Parameter. `Only add this many songs = 0` bedeutet Dauerbetrieb.
 Standardmäßig hält Ashuffle ein Lied voraus in der Queue.
+Mit **Clear Queue** wird die Queue geleert; ein laufendes Ashuffle füllt sie
+danach mit neuen Titeln. Die Löschmodi **Up**, **Single** und **Down** in der
+rechten Leiste bestimmen, ob beim Klick auf das Papierkorb-Symbol einer
+Queue-Zeile alle Titel bis zu dieser Zeile, nur dieser Titel oder alle Titel
+ab dieser Zeile entfernt werden.
 
 Die Einstellungen liegen beim systemd-Dienst in
 `/var/lib/ympd-webradio/ashuffle.conf`. Dateien für URI-Listen oder

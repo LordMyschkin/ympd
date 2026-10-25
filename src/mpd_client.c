@@ -131,14 +131,14 @@ int callback_mpd(struct mg_connection *c) {
             break;
         }
         case MPD_API_RM_ALL:
-            if (!ashuffle_enabled()) mpd_run_clear(mpd.conn);
+            mpd_run_clear(mpd.conn);
             break;
         case MPD_API_RM_TRACK:
             if (sscanf(c->content, "MPD_API_RM_TRACK,%u", &uint_buf))
                 mpd_run_delete_id(mpd.conn, uint_buf);
             break;
         case MPD_API_RM_RANGE:
-            if (sscanf(c->content, "MPD_API_RM_RANGE,%u,%u", &uint_buf, &uint_buf_2))
+            if (sscanf(c->content, "MPD_API_RM_RANGE,%u,%u", &uint_buf, &uint_buf_2) == 2)
                 mpd_run_delete_range(mpd.conn, uint_buf, uint_buf_2);
             break;
         case MPD_API_MOVE_TRACK:
@@ -475,12 +475,6 @@ void mpd_poll(struct mg_server *s) {
                 mpd_run_repeat(mpd.conn, 0);
                 mpd_run_single(mpd.conn, 0);
             }
-            /* write outputs */
-            mpd.buf_size = mpd_put_outputs(mpd.buf, 1);
-            for (struct mg_connection *c = mg_next(s, NULL); c != NULL; c = mg_next(s, c)) {
-                c->callback_param = NULL;
-                mpd_notify_callback(c, MG_POLL);
-            }
             break;
 
         case MPD_FAILURE:
@@ -496,11 +490,6 @@ void mpd_poll(struct mg_server *s) {
 
         case MPD_CONNECTED:
             mpd.buf_size = mpd_put_state(mpd.buf, &mpd.song_id, &mpd.queue_version);
-            for (struct mg_connection *c = mg_next(s, NULL); c != NULL; c = mg_next(s, c)) {
-                c->callback_param = NULL;
-                mpd_notify_callback(c, MG_POLL);
-            }
-            mpd.buf_size = mpd_put_outputs(mpd.buf, 0);
             for (struct mg_connection *c = mg_next(s, NULL); c != NULL; c = mg_next(s, c)) {
                 c->callback_param = NULL;
                 mpd_notify_callback(c, MG_POLL);
