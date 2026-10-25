@@ -67,6 +67,11 @@ fi
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 [[ -f "$repo_dir/CMakeLists.txt" && -f "$repo_dir/contrib/ympd-webradio.service" ]] ||
   die 'Der vollständige Quellbaum von ympd-webradio fehlt.'
+if ! "$deps_only"; then
+  [[ -f "$repo_dir/vendor/ashuffle/subprojects/absl/CMakeLists.txt" && \
+     -f "$repo_dir/vendor/ashuffle/subprojects/yaml-cpp/CMakeLists.txt" ]] ||
+    die 'Vendorteile von Ashuffle fehlen. Den vollständigen aktuellen Git-Stand abrufen.'
+fi
 
 printf 'Installiere Pakete für Debian 13 (Trixie).\n'
 "${root_cmd[@]}" apt-get update
