@@ -27,6 +27,18 @@ Im Wurzelverzeichnis des vollständigen Quellbaums ausführen:
 
 Das Skript installiert die Pakete, aktiviert und prüft `mpd.service`, baut
 beide Programme, installiert die Unit und prüft den HTTP-Zugriff auf Port 6080.
+Für einen VPS mit eigener Domain kann der HTTPS-Schritt gleich mitgestartet
+werden:
+
+```sh
+./trixie_prebuild.sh --https-domain musik.example.org
+```
+
+Läuft dort bereits Apache oder nginx, zeigt das Skript die dazu passenden
+Schritte an. Andernfalls installiert es Caddy, fragt ein Zugangspasswort ab
+und richtet HTTPS automatisch ein. Einzelheiten stehen unter
+[HTTPS auf einem VPS](#https-auf-einem-vps).
+
 Es kann zur Aktualisierung erneut ausgeführt werden. Mit
 `YMPD_BUILD_JOBS=2 ./trixie_prebuild.sh` lässt sich die Zahl der parallelen
 Build-Jobs verringern. `./trixie_prebuild.sh --deps-only` installiert nur die
@@ -99,15 +111,216 @@ ausgeben. Im Journal sollte eine Zeile `Starting bundled Ashuffle: ...`
 mit `/usr/local/bin/ashuffle` erscheinen. Bei einem Startfehler liefert
 `systemctl status ympd-webradio.service --no-pager` weitere Details.
 
-Die Unit bindet absichtlich nur an `127.0.0.1`. Auf dem Zielrechner ist die
-Oberfläche unter <http://127.0.0.1:6080/> erreichbar. Für den Zugriff von
-einem anderen Rechner kann ein SSH-Tunnel verwendet werden:
+Die Unit bindet absichtlich nur an `127.0.0.1`. Der lokale HTTP-Zugriff auf
+Port 6080 dient dem Reverse Proxy; im Browser auf einem anderen Rechner wird
+die HTTPS-Adresse verwendet. Port 6080 und der MPD-Port 6600 dürfen nicht
+öffentlich freigegeben werden.
+
+## HTTPS auf einem VPS
+
+MPD auf Port 6600 spricht kein HTTP. Die Weboberfläche wird deshalb über
+einen Reverse Proxy mit TLS und Passwortschutz veröffentlicht; MPD und ympd
+bleiben lokal gebunden. Dafür einen eigenen DNS-Namen wie
+`musik.example.org` auf den VPS zeigen lassen und eingehende TCP-Ports 80
+und 443 in Firewall beziehungsweise VPS-Panel erlauben. Port 80 dient nur
+der Zertifikatsausstellung und der Weiterleitung auf HTTPS. Extern wird die
+Oberfläche unter `https://musik.example.org/` aufgerufen.
+
+Nach einer bereits abgeschlossenen Grundinstallation kann die automatische
+Erkennung separat gestartet werden:
 
 ```sh
-ssh -L 6080:127.0.0.1:6080 BENUTZER@SERVER
+./https_setup.sh --domain musik.example.org
 ```
 
-Danach im Browser des eigenen Rechners <http://127.0.0.1:6080/> öffnen.
+`--auth-user NAME` ändert den Browser-Benutzernamen (Standard: `ympd`).
+Das Skript prüft den lokalen ympd-Dienst. Wenn Apache oder nginx bereits
+läuft, gibt es Anweisungen für diesen Server aus und ändert dessen
+Konfiguration nicht. Falls keiner von beiden läuft, installiert es das
+Debian-Paket `caddy`, fragt das Passwort zweimal verdeckt ab, schreibt
+`/etc/caddy/Caddyfile` mit Passwortschutz und startet Caddy. Es überschreibt
+keine bereits vorhandene Caddy-Installation. Die Trixie-Version von Caddy
+verwendet die Direktive `basicauth`.
+
+### HTTPS mit vorhandenem Apache
+
+Auf einem VPS mit laufendem Apache **Apache weiterverwenden**. Das folgende
+Beispiel nimmt eine neue Subdomain an, die noch keinem VirtualHost zugeordnet
+ist. `musik.example.org` überall durch den eigenen DNS-Namen ersetzen.
+
+```sh
+sudo apt install certbot python3-certbot-apache apache2-utils
+sudo a2enmod proxy proxy_http ssl
+sudo htpasswd -B -c /etc/apache2/ympd-webradio.htpasswd ympd
+```
+
+`-c` nur beim ersten Anlegen der Passwortdatei verwenden; beim Ändern oder
+Hinzufügen eines Benutzers `sudo htpasswd -B DATEI BENUTZER` ohne `-c` ausführen.
+Zuerst einen reinen HTTP-VirtualHost für die Zertifikatsprüfung in
+`/etc/apache2/sites-available/ympd-webradio.conf` anlegen. Er leitet noch
+keine Anfragen an ympd weiter:
+
+```apache
+<VirtualHost *:80>
+    ServerName musik.example.org
+    DocumentRoot /var/www/html
+</VirtualHost>
+```
+
+```sh
+sudo a2ensite ympd-webradio.conf
+sudo apache2ctl configtest
+sudo systemctl reload apache2
+sudo certbot certonly --apache -d musik.example.org
+```
+
+Nach erfolgreicher Zertifikatsausstellung **dieselbe Datei** durch diese
+endgültige Konfiguration ersetzen:
+
+```apache
+<VirtualHost *:80>
+    ServerName musik.example.org
+    Redirect permanent / https://musik.example.org/
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName musik.example.org
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/musik.example.org/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/musik.example.org/privkey.pem
+    ProxyRequests Off
+    ProxyPass "/" "http://127.0.0.1:6080/" upgrade=websocket
+    ProxyPassReverse "/" "http://127.0.0.1:6080/"
+    <Location "/">
+        AuthType Basic
+        AuthName "ympd-webradio"
+        AuthUserFile /etc/apache2/ympd-webradio.htpasswd
+        Require valid-user
+    </Location>
+</VirtualHost>
+```
+
+```sh
+sudo apache2ctl configtest
+sudo systemctl reload apache2
+sudo install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+sudo install -m 0755 contrib/certbot-reload-apache.sh \
+  /etc/letsencrypt/renewal-hooks/deploy/ympd-reload-apache
+sudo certbot renew --dry-run
+curl -I https://musik.example.org/
+```
+
+Der letzte Befehl soll ohne Zugangsdaten `401` liefern. Bei einem anderen
+Zertifikatsnamen den tatsächlichen Pfad unter `/etc/letsencrypt/live/`
+verwenden. Wenn die Domain bereits in einem anderen Apache-VirtualHost
+benutzt wird, den TLS-Proxy und den `<Location>`-Block dort eintragen,
+statt einen zweiten VirtualHost mit demselben Namen anzulegen.
+
+### HTTPS mit vorhandenem nginx
+
+Für eine neue, noch nicht anderweitig konfigurierte Subdomain:
+
+```sh
+sudo apt install certbot python3-certbot-nginx apache2-utils
+sudo htpasswd -B -c /etc/nginx/ympd-webradio.htpasswd ympd
+```
+
+Auch hier `-c` nur beim ersten Anlegen der Passwortdatei verwenden. Zuerst
+einen reinen HTTP-Server-Block in
+`/etc/nginx/sites-available/ympd-webradio` anlegen:
+
+```nginx
+server {
+    listen 80;
+    server_name musik.example.org;
+    root /var/www/html;
+}
+```
+
+```sh
+sudo ln -s /etc/nginx/sites-available/ympd-webradio /etc/nginx/sites-enabled/ympd-webradio
+sudo nginx -t
+sudo systemctl reload nginx
+sudo certbot certonly --nginx -d musik.example.org
+```
+
+Danach die Datei durch diese endgültige Konfiguration ersetzen:
+
+```nginx
+server {
+    listen 80;
+    server_name musik.example.org;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name musik.example.org;
+    ssl_certificate /etc/letsencrypt/live/musik.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/musik.example.org/privkey.pem;
+
+    auth_basic "ympd-webradio";
+    auth_basic_user_file /etc/nginx/ympd-webradio.htpasswd;
+
+    location / {
+        proxy_pass http://127.0.0.1:6080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
+```sh
+sudo nginx -t
+sudo systemctl reload nginx
+sudo install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+sudo install -m 0755 contrib/certbot-reload-nginx.sh \
+  /etc/letsencrypt/renewal-hooks/deploy/ympd-reload-nginx
+sudo certbot renew --dry-run
+curl -I https://musik.example.org/
+```
+
+Die WebSocket-Header sind für die Live-Anzeige der Oberfläche erforderlich.
+Der HTTPS-Test soll ohne Zugangsdaten `401` liefern. Der installierte
+Deploy-Hook lädt nginx nach einer Zertifikatserneuerung neu. Für Apache gilt
+der entsprechende Hook im Abschnitt davor.
+Bei einer bereits vorhandenen nginx-Konfiguration für denselben DNS-Namen
+den `location /`-Block und den Passwortschutz in deren Server-Block
+integrieren. Die Zertifikatsbefehle setzen voraus, dass die Domain öffentlich
+auf diesen VPS zeigt und Port 80 erreichbar ist.
+
+### HTTPS mit Caddy
+
+Wenn Apache und nginx nicht laufen und Caddy noch nicht installiert ist,
+erledigt `./https_setup.sh --domain musik.example.org` Installation,
+Passwortschutz und systemd-Start automatisch. Caddy verwaltet das Zertifikat
+und dessen Erneuerung selbst. Der Aufruf
+`curl -I https://musik.example.org/` soll ohne Zugangsdaten `401` liefern;
+im Browser erfolgt danach die Passwortabfrage. Bei Problemen:
+
+```sh
+sudo journalctl -u caddy.service -b --no-pager -n 50
+```
+
+Ist Caddy bereits installiert, die vorhandene `/etc/caddy/Caddyfile`
+bearbeiten und folgenden Site-Block ergänzen; den Hash interaktiv mit
+`caddy hash-password` erzeugen:
+
+```caddyfile
+musik.example.org {
+    basicauth {
+        ympd HIER_DEN_PASSWORT_HASH_EINTRAGEN
+    }
+    reverse_proxy 127.0.0.1:6080
+}
+```
+
+Danach mit `sudo caddy validate --config /etc/caddy/Caddyfile` prüfen und
+`sudo systemctl reload caddy` ausführen. Wenn eine neuere Caddy-Version ab
+2.8 installiert ist, `basic_auth` statt `basicauth` verwenden.
 
 ## Ashuffle-Einstellungen
 

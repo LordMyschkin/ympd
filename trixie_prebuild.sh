@@ -4,11 +4,14 @@ set -Eeuo pipefail
 usage() {
   cat <<'EOF'
 Usage: ./trixie_prebuild.sh [--deps-only]
+       ./trixie_prebuild.sh --https-domain DOMAIN [--auth-user BENUTZER]
 
 Installiert auf Debian 13 (Trixie) die benötigten Pakete, baut ympd und
 Ashuffle und richtet den systemd-Dienst auf Port 6080 ein.
 
   --deps-only  Nur Pakete installieren; keinen Build und keinen Dienst starten
+  --https-domain DOMAIN  HTTPS-Einrichtung nach der Installation starten
+  --auth-user BENUTZER  Benutzername für den HTTPS-Zugang (Standard: ympd)
   -h, --help   Diese Hilfe anzeigen
 
 Build-Jobs lassen sich mit YMPD_BUILD_JOBS=N festlegen (Standard: 4).
@@ -22,13 +25,31 @@ die() {
 }
 
 deps_only=false
-case "${1:-}" in
-  '') ;;
-  --deps-only) deps_only=true ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 2 ;;
-esac
-[[ $# -le 1 ]] || { usage >&2; exit 2; }
+https_domain=''
+auth_user='ympd'
+while (($#)); do
+  case "$1" in
+    --deps-only) deps_only=true; shift ;;
+    --https-domain)
+      [[ $# -ge 2 ]] || die '--https-domain benötigt einen Domainnamen.'
+      https_domain=$2
+      shift 2
+      ;;
+    --auth-user)
+      [[ $# -ge 2 ]] || die '--auth-user benötigt einen Benutzernamen.'
+      auth_user=$2
+      shift 2
+      ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+if "$deps_only" && [[ -n "$https_domain" ]]; then
+  die '--deps-only und --https-domain können nicht kombiniert werden.'
+fi
+if [[ "$auth_user" != ympd && -z "$https_domain" ]]; then
+  die '--auth-user benötigt auch --https-domain.'
+fi
 
 [[ -r /etc/os-release ]] || die '/etc/os-release fehlt.'
 # shellcheck disable=SC1091
@@ -96,3 +117,6 @@ done
   die 'Die Weboberfläche antwortet nicht mit HTTP 200 auf 127.0.0.1:6080. journalctl -u ympd-webradio.service -b prüfen.'
 
 printf 'Installation abgeschlossen: http://127.0.0.1:6080/\n'
+if [[ -n "$https_domain" ]]; then
+  "$repo_dir/https_setup.sh" --domain "$https_domain" --auth-user "$auth_user"
+fi
