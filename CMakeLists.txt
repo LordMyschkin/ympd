@@ -1,6 +1,8 @@
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.16)
 
-project (ympd C)
+project (ympd C CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake/")
 set(CPACK_PACKAGE_VERSION_MAJOR "1")
 set(CPACK_PACKAGE_VERSION_MINOR "2")
@@ -18,6 +20,7 @@ option(WITH_SSL "enable SSL support" ON)
 
 find_package(LibMPDClient REQUIRED)
 find_package(Threads REQUIRED)
+add_subdirectory(vendor/ashuffle)
 
 configure_file(src/config.h.in ${PROJECT_BINARY_DIR}/config.h)
 include_directories(${PROJECT_BINARY_DIR} ${PROJECT_SOURCE_DIR}	${LIBMPDCLIENT_INCLUDE_DIR})
@@ -49,6 +52,7 @@ file(GLOB RESOURCES
 set(SOURCES
     src/ympd.c
     src/mpd_client.c
+    src/ashuffle_control.c
     src/mongoose.c
     src/json_encode.c
 )
@@ -71,10 +75,11 @@ if(NOT WITH_DYNAMIC_ASSETS)
 endif()
 
 add_executable(ympd ${SOURCES})
+add_dependencies(ympd ashuffle)
 target_link_libraries(ympd ${LIBMPDCLIENT_LIBRARY} ${CMAKE_THREAD_LIBS_INIT} ${OPENSSL_LIBRARIES})
 
-install(TARGETS ympd DESTINATION bin)
-install(FILES ympd.1 DESTINATION ${CMAKE_INSTALL_PREFIX}/share/man/man1)
+install(TARGETS ympd ashuffle DESTINATION bin)
+install(FILES ympd.1 DESTINATION share/man/man1)
 if(WITH_DYNAMIC_ASSETS)
     install(DIRECTORY htdocs DESTINATION share/${PROJECT_NAME})
 endif()

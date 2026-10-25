@@ -1,2 +1,3 @@
 # Build Artifacts
 build/
+.DS_Store

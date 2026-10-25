@@ -1,0 +1,449 @@
+// Package testmpd provides helpers for starting and examining test MPD
+// instances.
+package testmpd
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"syscall"
+	"text/template"
+	"time"
+
+	"github.com/cenkalti/backoff"
+	mpdc "github.com/fhs/gompd/v2/mpd"
+	"github.com/martinlindhe/unit"
+)
+
+const (
+	mpdConnectBackoff  = 500 * time.Millisecond
+	mpdConnectMax      = 30 * time.Second
+	mpdUpdateDBBackoff = 100 * time.Millisecond
+	mpdUpdateDBMax     = 30 * time.Second
+	mpdShutdownMaxWait = 5 * time.Second
+)
+
+// Password is the type of an MPD password. A literal password, a collection
+// of permissions for users of that password.
+type Password struct {
+	// Password is the actual password the user must enter to get the
+	// requested permissions.
+	Password string
+
+	// Permissions is the list of permissions granted to users of this
+	// password.
+	Permissions []string
+}
+
+// Options are the options used when creating this MPD instance.
+type Options struct {
+	// BinPath is the path to the MPD binary. Leave it empty to use the PATH
+	// to search for MPD.
+	BinPath string
+	// LibraryRoot is the root directory of MPD's music library.
+	LibraryRoot string
+	// DefaultPermissions is the list of permissions given to unauthenticated
+	// users. Leave it empty or nil to use the MPD default.
+	DefaultPermissions []string
+
+	// If non-zero, this value is set as the `max_output_buffer_size` option
+	// in the MPD configuration.
+	MaxOutputBufferSize unit.Datasize
+
+	// The maximum amount of time to wait for MPD to update its database. If
+	// unset, the default timeout is used.
+	UpdateDBTimeout time.Duration
+
+	// Passwords is the list of passwords to configure on this instance. See
+	// `Password' for per-password options.
+	Passwords []Password
+}
+
+type mpdTemplateInput struct {
+	Options
+	MPDRoot string
+}
+
+var mpdConfTemplate = template.Must(template.New("mpd.conf").
+	Funcs(map[string]interface{}{
+		"floatToInt": func(f float64) int64 {
+			return int64(f)
+		},
+	}).
+	Parse(`
+music_directory     "{{ .LibraryRoot }}"
+playlist_directory  "{{ .MPDRoot }}/playlists"
+db_file             "{{ .MPDRoot }}/database"
+pid_file            "{{ .MPDRoot }}/pid"
+state_file          "{{ .MPDRoot }}/state"
+sticker_file        "{{ .MPDRoot }}/sticker.sql"
+bind_to_address     "{{ .MPDRoot }}/socket"
+{{ if ne .MaxOutputBufferSize 0.0 }}max_output_buffer_size "{{ .MaxOutputBufferSize.Kibibytes | floatToInt }}"{{ end }}
+audio_output {
+	type		"null"
+	name		"null"
+}
+
+{{ if .DefaultPermissions -}}
+    default_permissions "
+    {{- range $index, $perm := .DefaultPermissions -}}
+        {{- if $index -}},{{- end -}}
+        {{ $perm }}
+    {{- end -}}
+    "
+{{- end -}}
+
+{{ if .Passwords }}
+{{ range .Passwords }}
+password "{{ .Password }}@
+    {{- range $index, $perm := .Permissions -}}
+        {{- if $index -}},{{- end -}}
+        {{ $perm }}
+    {{- end -}}
+"
+{{- end }}
+{{ end }}
+`))
+
+// build builds a conf file from the options, and returns the conf file
+// text, as well as the MPD UNIX socket path (which is set in the
+// configuration)
+func (m Options) Build(rootDir string) (string, string) {
+	var confFile bytes.Buffer
+
+	if err := mpdConfTemplate.Execute(&confFile, mpdTemplateInput{m, rootDir}); err != nil {
+		panic(err)
+	}
+	return confFile.String(), filepath.Join(rootDir, "socket")
+}
+
+// MPD is the type of an MPD instance. It can be constructed with New,
+// and controlled with the various member methods.
+type MPD struct {
+	// Addr is the UNIX socket this MPD instance is listening on.
+	Addr string
+
+	// Stdout is a buffer that contains the standard output of the MPD process.
+	Stdout *bytes.Buffer
+	// Stderr is a buffer that contains the standard error of the MPD process.
+	Stderr *bytes.Buffer
+
+	root       Root
+	cmd        *exec.Cmd
+	cli        *mpdc.Client
+	cancelFunc func()
+
+	// Errors is a list of all errors that have occured when trying to access
+	// this MPD instance. Usually it should be empty, so it's not worth
+	// checking most of the time. The `IsOk` can be used as a quick check
+	// that access to this MPD instance is healthy.
+	Errors []error
+}
+
+// Address returns `i.Addr` as the host, and an empty port.
+func (m MPD) Address() (string, string) {
+	return m.Addr, ""
+}
+
+// Shutdown shuts down this MPD instance, and cleans up associated data.
+func (m *MPD) Shutdown() error {
+	if m.root.owned {
+		// Only cleanup the root if it's owned by this MPD instance.
+		defer m.root.Cleanup()
+	}
+	m.cli.Close()
+
+	// Shutdown the server, either via SIGTERM, or by cancelling the
+	// command context.
+	if err := m.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		// If we fail, then shutdown the context to force shutdown of MPD.
+		log.Printf("failed to send SIGTERM to MPD: %s, forcing shutdown", err)
+		m.cancelFunc()
+	}
+
+	// Wait for the cmd to exit. In the background.
+	done := make(chan error, 1)
+	go func() {
+		done <- m.cmd.Wait()
+		close(done)
+	}()
+
+	// Make sure we call cancel no matter what. Cancel is idempotent, so it's
+	// fine if it gets called twice.
+	defer m.cancelFunc()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(mpdShutdownMaxWait):
+		log.Printf("failed to shutdown MPD after %s, forcing shutdown", mpdShutdownMaxWait)
+		m.cancelFunc()
+		return <-done
+	}
+}
+
+// IsOk returns true if there have been no errors on this instance. You can
+// use MPD.Errors to see any errors that have occured.
+func (m *MPD) IsOk() bool {
+	return len(m.Errors) == 0
+}
+
+func (m *MPD) maybeErr(err error) {
+	if err != nil {
+		m.Errors = append(m.Errors, err)
+	}
+}
+
+// Play plays the song in the current position in the MPD queue.
+func (m *MPD) Play() {
+	m.maybeErr(m.cli.Pause(false))
+}
+
+// Pause pauses the currently playing song.
+func (m *MPD) Pause() {
+	m.maybeErr(m.cli.Pause(true))
+}
+
+// Next skips the current song.
+func (m *MPD) Next() {
+	m.maybeErr(m.cli.Next())
+}
+
+// Prev goes back to the previous song.
+func (m *MPD) Prev() {
+	m.maybeErr(m.cli.Previous())
+}
+
+// Db returns a list of all URIs in this MPD instance's database.
+func (m *MPD) Db() []string {
+	res, err := m.cli.GetFiles()
+	if err != nil {
+		m.Errors = append(m.Errors, err)
+		return nil
+	}
+	return res
+}
+
+// Queue returns an array of the songs currently in the queue.
+func (m *MPD) Queue() []string {
+	attrs, err := m.cli.PlaylistInfo(-1, -1)
+	if err != nil {
+		m.Errors = append(m.Errors, err)
+		return nil
+	}
+	var result []string
+	for _, attr := range attrs {
+		result = append(result, attr["file"])
+	}
+	return result
+}
+
+func (m *MPD) QueuePos() int64 {
+	attrs, err := m.cli.Status()
+	if err != nil {
+		m.Errors = append(m.Errors, err)
+		return -1
+	}
+	res, err := strconv.ParseInt(attrs["song"], 10, 64)
+	if err != nil {
+		m.Errors = append(m.Errors, err)
+		return -1
+	}
+	return res
+}
+
+type State string
+
+const (
+	StateUnknown = State("unknown")
+	StatePlay    = State("play")
+	StatePause   = State("pause")
+	StateStop    = State("stop")
+)
+
+func (m *MPD) PlayState() State {
+	attr, err := m.cli.Status()
+	if err != nil {
+		m.Errors = append(m.Errors, err)
+		return StateUnknown
+	}
+	switch attr["state"] {
+	case "play":
+		return StatePlay
+	case "pause":
+		return StatePause
+	case "stop":
+		return StateStop
+	}
+	return StateUnknown
+}
+
+func (m *MPD) Clear() {
+	m.maybeErr(m.cli.Clear())
+}
+
+// A Root represents the state required to run an instance of MPD.
+type Root struct {
+	path     string
+	socket   string
+	confPath string
+	options  *Options
+
+	// Set to true if this root is owned by the MPD instance. If set to
+	// false it will not be cleaned up when the MPD instance is destroyed.
+	owned bool
+
+	cleanupOnce sync.Once
+}
+
+// Cleanup any state associated with this root. Should be called when
+// the root is no longer needed.
+func (r *Root) Cleanup() {
+	// We only want to do this once per-root. Future cleanups should be
+	// no-ops.
+	r.cleanupOnce.Do(func() {
+		os.RemoveAll(r.path)
+	})
+}
+
+// The root is what actually defines the address, so Root can also provide
+// the address associated with an MPD instance.
+func (r *Root) Address() (string, string) {
+	return r.socket, ""
+}
+
+func (r Root) hasOptions() bool {
+	return r.options != nil
+}
+
+// Create a new Root. The caller is expected to call Root.Cleanup when its
+// done using the root.
+func NewRoot(opts *Options) (*Root, error) {
+	rootPath, err := ioutil.TempDir(os.TempDir(), "mpd-harness")
+	if err != nil {
+		return nil, err
+	}
+	conf, err := ioutil.TempFile(rootPath, "generated-conf")
+	if err != nil {
+		os.RemoveAll(rootPath)
+		return nil, err
+	}
+	confPath := conf.Name()
+	confString, mpdSocket := opts.Build(rootPath)
+	if _, err := conf.Write([]byte(confString)); err != nil {
+		os.RemoveAll(rootPath)
+		return nil, err
+	}
+	conf.Close()
+	return &Root{
+		path:     rootPath,
+		socket:   mpdSocket,
+		confPath: confPath,
+		options:  opts,
+	}, nil
+}
+
+func New(ctx context.Context, opts *Options) (*MPD, error) {
+	root, err := NewRoot(opts)
+	if err != nil {
+		return nil, err
+	}
+	// We created this root, so we take ownership of its lifecycle.
+	root.owned = true
+	return NewWithRoot(ctx, root)
+}
+
+// New creates a new MPD instance with the given options. If `opts' is nil,
+// then default options will be used. If a new MPD instance cannot be created,
+// an error is returned.
+func NewWithRoot(ctx context.Context, root *Root) (*MPD, error) {
+	mpdCtx, mpdCancel := context.WithCancel(ctx)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	mpdBin := "mpd"
+	if root.hasOptions() && root.options.BinPath != "" {
+		mpdBin = root.options.BinPath
+	}
+	cmd := exec.CommandContext(mpdCtx, mpdBin, "--no-daemon", "--stderr", root.confPath)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	earlyExitCleanup := func() {
+		mpdCancel()
+		// We only cleanup the root if we own it.
+		if root.owned {
+			root.Cleanup()
+		}
+	}
+
+	if err := cmd.Start(); err != nil {
+		earlyExitCleanup()
+		return nil, err
+	}
+
+	// Keep re-trying to connect to mpd every mpdConnectBackoff, aborting
+	// if mpdConnectMax time units have gone by.
+	connectCtx, cancel := context.WithTimeout(ctx, mpdConnectMax)
+	defer cancel()
+	connectBackoff := backoff.WithContext(backoff.NewConstantBackOff(mpdConnectBackoff), connectCtx)
+
+	var cli *mpdc.Client
+	err := backoff.Retry(func() error {
+		onceCli, err := mpdc.Dial("unix", root.socket)
+		if err != nil {
+			return err
+		}
+		cli = onceCli
+		return nil
+	}, connectBackoff)
+	if err != nil {
+		earlyExitCleanup()
+		return nil, fmt.Errorf("failed to connect to mpd at %s: %v", root.socket, err)
+	}
+	if cli == nil {
+		panic("backoff did not return an error. This should not happen.")
+	}
+
+	updateTimeout := mpdUpdateDBMax
+	if root.hasOptions() && root.options.UpdateDBTimeout != 0 {
+		updateTimeout = root.options.UpdateDBTimeout
+	}
+
+	updateCtx, cancel := context.WithTimeout(ctx, updateTimeout)
+	defer cancel()
+	updateBackoff := backoff.WithContext(backoff.NewConstantBackOff(mpdUpdateDBBackoff), updateCtx)
+	err = backoff.Retry(func() error {
+		attr, err := cli.Status()
+		if err != nil {
+			return backoff.Permanent(err)
+		}
+		if attr["updating_db"] == "1" {
+			return errors.New("db still updating")
+		}
+		return nil
+
+	}, updateBackoff)
+	if err != nil {
+		earlyExitCleanup()
+		return nil, fmt.Errorf("failed to wait for MPD db to update: %v", err)
+	}
+
+	return &MPD{
+		Addr:   root.socket,
+		Stdout: &stdout,
+		Stderr: &stderr,
+
+		root:       *root,
+		cmd:        cmd,
+		cli:        cli,
+		cancelFunc: mpdCancel,
+	}, nil
+}

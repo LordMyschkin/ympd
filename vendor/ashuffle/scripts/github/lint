@@ -1,0 +1,7 @@
+#!/bin/bash
+
+. "scripts/github/common.sh"
+
+setup "$(uname -m)" 
+env meson build || die "couldn't run meson"
+exec env CLANG_TIDY="${CLANG_TIDY}" ninja -C build ashuffle-clang-tidy

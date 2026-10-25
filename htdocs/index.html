@@ -10,7 +10,7 @@
     />
     <meta name="author" content="andy@ndyk.de" />
 
-    <title>ympd</title>
+    <title>ympd Radio</title>
 
     <!-- Bootstrap core CSS -->
     <link href="css/bootstrap.css" rel="stylesheet" />
@@ -40,7 +40,7 @@
             <span class="icon-bar"></span>
           </button>
           <a class="navbar-brand" href="/"
-            ><span class="glyphicon glyphicon-play-circle"></span> ympd</a
+            ><span class="glyphicon glyphicon-signal"></span> ympd Radio</a
           >
         </div>
         <div class="collapse navbar-collapse">
@@ -72,20 +72,7 @@
               >
                 <span class="glyphicon glyphicon-backward"></span>
               </button>
-              <button
-                type="button"
-                class="btn btn-default"
-                onclick="socket.send('MPD_API_SET_STOP');"
-              >
-                <span id="stop-icon" class="glyphicon glyphicon-stop"></span>
-              </button>
-              <button
-                type="button"
-                class="btn btn-default"
-                onclick="clickPlay();"
-              >
-                <span id="play-icon" class="glyphicon glyphicon-pause"></span>
-              </button>
+              <!-- Radio playback is continuous; stop and pause controls are intentionally omitted. -->
               <button
                 type="button"
                 class="btn btn-default"
@@ -94,19 +81,8 @@
                 <span class="glyphicon glyphicon-forward"></span>
               </button>
             </div>
-            <div class="btn-group" role="group">
-              <button
-                type="button"
-                class="btn btn-default"
-                onclick="clickLocalPlay()"
-              >
-                <audio id="player" preload="none"></audio>
-                <span
-                  id="localplay-icon"
-                  class="glyphicon glyphicon-play"
-                ></span>
-              </button>
-            </div>
+            <!-- Local browser playback could be paused; omit its controls in radio mode. -->
+            <audio id="player" preload="none" hidden></audio>
             <div class="btn-group" role="group" id="volume-group">
               <div class="btn btn-toolbar btn-default">
                 <span
@@ -138,11 +114,7 @@
             <!-- Default panel contents -->
             <div class="panel-body">
               <h1>
-                <span
-                  id="track-icon"
-                  onclick="clickPlay();"
-                  class="glyphicon glyphicon-play"
-                ></span>
+                <span id="track-icon" class="glyphicon glyphicon-signal"></span>
                 <span id="currenttrack"></span>
                 <span id="love">
                   <button
@@ -203,67 +175,28 @@
               class="btn-group-vertical btn-block btn-group-lg"
               data-toggle="buttons"
             >
-              <button id="btnrandom" type="button" class="btn btn-default">
-                <span class="glyphicon glyphicon-random"></span> Random
-              </button>
+              <!-- Radio selects random library tracks and manages queue order. -->
               <button id="btnconsume" type="button" class="btn btn-default">
                 <span class="glyphicon glyphicon-fire"></span> Consume
               </button>
-              <button id="btnsingle" type="button" class="btn btn-default">
-                <span class="glyphicon glyphicon-star"></span> Single
-              </button>
+              <!-- Single mode could interrupt continuous playback. -->
               <button id="btncrossfade" type="button" class="btn btn-default">
                 <span class="glyphicon glyphicon-link"></span> Crossfade
               </button>
-              <button id="btnrepeat" type="button" class="btn btn-default">
-                <span class="glyphicon glyphicon-repeat"></span> Repeat
-              </button>
+              <!-- Repeat would prevent new random tracks from entering rotation. -->
             </div>
             <div
               id="btn-outputs-block"
               class="btn-group-vertical btn-block btn-group-lg"
             ></div>
 
-            <div
-              id="trashmode"
-              class="btn-group-vertical btn-block btn-group-lg"
-              data-toggle="radio"
-            >
-              <button id="btntrashmodeup" type="button" class="btn btn-default">
-                <span class="glyphicon glyphicon-chevron-up"></span>
-                <span class="glyphicon glyphicon-trash"></span> <span>Up</span>
-              </button>
-              <button
-                id="btntrashmodesingle"
-                type="button"
-                class="btn btn-default active"
-              >
-                <span class="glyphicon glyphicon-star-empty"></span>
-                <span class="glyphicon glyphicon-trash"></span>
-                <span>Single</span>
-              </button>
-              <button
-                id="btntrashmodedown"
-                type="button"
-                class="btn btn-default"
-              >
-                <span class="glyphicon glyphicon-chevron-down"></span>
-                <span class="glyphicon glyphicon-trash"></span>
-                <span>Down</span>
-              </button>
-            </div>
+            <!-- Queue deletion could remove the playing stream. -->
 
             <div
               id="btn-responsive-block"
               class="btn-group-vertical btn-block btn-group-lg"
             >
-              <button
-                type="button"
-                class="btn btn-default"
-                onclick="socket.send('MPD_API_RM_ALL');"
-              >
-                <span class="glyphicon glyphicon-trash"></span> Clear Queue
-              </button>
+              <!-- Clearing the queue would silence the radio. -->
               <a
                 href="#"
                 data-toggle="modal"
@@ -409,18 +342,78 @@
                 </div>
               </div>
             </form>
-            <div class="row">
-              <div class="form-group col-md-12" data-toggle="buttons">
-                <button
-                  type="button"
-                  class="btn btn-default btn-block"
-                  id="btnautoplay"
-                >
-                  <span class="glyphicon glyphicon-play"></span> Autoplay stream
-                  in this browser when mpd is playing
-                </button>
+            <!-- Browser playback has a pause control and is omitted for continuous radio. -->
+            <hr />
+            <fieldset id="ashuffle-settings">
+              <legend>Ashuffle Radio</legend>
+              <p id="ashuffle-status" class="help-block">Loading Ashuffle status…</p>
+              <div class="row">
+                <div class="form-group col-sm-6">
+                  <label for="ashuffle-enabled">Radio</label>
+                  <select id="ashuffle-enabled" class="form-control">
+                    <option value="1">Enabled</option><option value="0">Disabled</option>
+                  </select>
+                </div>
+                <div class="form-group col-sm-6">
+                  <label for="ashuffle-mode">Shuffle</label>
+                  <select id="ashuffle-mode" class="form-control">
+                    <option value="songs">Individual songs</option>
+                    <option value="albums">Whole albums</option>
+                    <option value="groups">Custom tag groups</option>
+                  </select>
+                </div>
               </div>
-            </div>
+              <div class="row">
+                <div class="form-group col-sm-6">
+                  <label for="ashuffle-buffer">Songs ahead in queue</label>
+                  <input id="ashuffle-buffer" class="form-control" type="number" min="0" max="100" value="1" />
+                  <p class="help-block">Use at least 1 for gapless playback and crossfade.</p>
+                </div>
+                <div class="form-group col-sm-6">
+                  <label for="ashuffle-groups">Group tags</label>
+                  <input id="ashuffle-groups" class="form-control" placeholder="album,date" />
+                  <p class="help-block">For custom tag groups, separated by commas.</p>
+                </div>
+              </div>
+              <div class="row">
+                <div class="form-group col-sm-6">
+                  <label for="ashuffle-file">URI list file</label>
+                  <input id="ashuffle-file" class="form-control" placeholder="Optional path on the server" />
+                </div>
+                <div class="form-group col-sm-6">
+                  <label for="ashuffle-exclude">Exclusion rules YAML</label>
+                  <input id="ashuffle-exclude" class="form-control" placeholder="Optional path on the server" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="ashuffle-rules">Exclude rules</label>
+                <input id="ashuffle-rules" class="form-control" placeholder="artist=MGMT,album=Congratulations;artist=Arctic" />
+                <p class="help-block">Separate tag matches with commas and separate rules with semicolons. A song matching any rule is excluded.</p>
+              </div>
+              <div class="row">
+                <div class="form-group col-sm-6">
+                  <label for="ashuffle-no-check"><input id="ashuffle-no-check" type="checkbox" /> Skip URI checks</label>
+                </div>
+                <div class="form-group col-sm-6">
+                  <label for="ashuffle-only">Only add this many songs</label>
+                  <input id="ashuffle-only" class="form-control" type="number" min="0" value="0" />
+                  <p class="help-block">0 keeps radio running continuously.</p>
+                </div>
+              </div>
+              <details>
+                <summary>Advanced Ashuffle options</summary>
+                <div class="row">
+                  <div class="form-group col-sm-4"><label for="ashuffle-window">Shuffle window size</label><input id="ashuffle-window" class="form-control" type="number" min="1" value="7" /></div>
+                  <div class="form-group col-sm-4"><label for="ashuffle-reconnect">Reconnect timeout</label><input id="ashuffle-reconnect" class="form-control" value="10s" /></div>
+                  <div class="form-group col-sm-4"><label for="ashuffle-suspend">Suspend timeout</label><input id="ashuffle-suspend" class="form-control" value="0ms" /></div>
+                </div>
+                <div class="row">
+                  <div class="form-group col-sm-6"><label for="ashuffle-startup"><input id="ashuffle-startup" type="checkbox" checked /> Play on startup</label></div>
+                  <div class="form-group col-sm-6"><label for="ashuffle-db-update"><input id="ashuffle-db-update" type="checkbox" /> Exit on database update</label></div>
+                </div>
+                <div class="form-group"><label for="ashuffle-log">Log file</label><input id="ashuffle-log" class="form-control" placeholder="Optional path on the server" /></div>
+              </details>
+            </fieldset>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-default" data-dismiss="modal">

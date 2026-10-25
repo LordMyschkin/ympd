@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "ashuffle_control.h"
 #include "http_server.h"
 #include "mongoose.h"
 #include "mpd_client.h"
@@ -54,6 +55,23 @@ static int server_callback(struct mg_connection *c, enum mg_event ev) {
                     return MG_TRUE;
             } else
 #ifdef WITH_DYNAMIC_ASSETS
+                if (!strcmp(c->uri, "/wss-auth")) {
+                    unsigned char random_bytes[WSS_AUTH_TOKEN_SIZE];
+                    char token[WSS_AUTH_TOKEN_SIZE + 1];
+                    FILE *random = fopen("/dev/urandom", "rb");
+                    if (!random) return MG_FALSE;
+                    size_t got = fread(random_bytes, 1, sizeof(random_bytes), random);
+                    fclose(random);
+                    if (got != sizeof(random_bytes)) return MG_FALSE;
+                    for (size_t i = 0; i < sizeof(random_bytes); ++i)
+                        token[i] = 'A' + random_bytes[i] % 26;
+                    token[sizeof(random_bytes)] = 0;
+                    free(mpd.wss_auth_token);
+                    mpd.wss_auth_token = strdup(token);
+                    mg_send_header(c, "Content-Type", "text/plain");
+                    mg_send_data(c, token, WSS_AUTH_TOKEN_SIZE);
+                    return MG_TRUE;
+                }
                 return MG_FALSE;
 #else
                 return callback_http(c);
@@ -81,7 +99,7 @@ int main(int argc, char **argv) {
     unsigned int current_timer = 0, last_timer = 0;
     char *run_as_user = NULL;
     char const *error_msg = NULL;
-    char *webport = "8080";
+    char *webport = "6080";
 
     atexit(bye);
 #ifdef WITH_DYNAMIC_ASSETS
@@ -152,7 +170,7 @@ int main(int argc, char **argv) {
                         " -h, --host <host>\t\tconnect to mpd at host [localhost]\n"
                         " -p, --port <port>\t\tconnect to mpd at port [6600]\n"
                         " -l, --localport <port>\t\tskip authorization for local port\n"
-                        " -w, --webport [ip:]<port>\tlisten interface/port for webserver [8080]\n"
+                        " -w, --webport [ip:]<port>\tlisten interface/port for webserver [6080]\n"
                         " -u, --user <username>\t\tdrop priviliges to user after socket bind\n"
                         " -v, --version\t\t\tget version\n"
                         " -m, --mpdpass <password>\tspecifies the password to use when connecting "
@@ -184,15 +202,18 @@ int main(int argc, char **argv) {
         }
     }
 
+    ashuffle_init(argv[0]);
     while (!force_exit) {
         mg_poll_server(server, 200);
         current_timer = time(NULL);
         if (current_timer - last_timer) {
             last_timer = current_timer;
             mpd_poll(server);
+            ashuffle_tick();
         }
     }
 
+    ashuffle_shutdown();
     mpd_disconnect();
     mg_destroy_server(&server);
 

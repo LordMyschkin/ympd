@@ -1,7 +1,33 @@
 body {
   padding-top: 50px;
   padding-bottom: 50px;
+  background: #f5f8fb;
+  color: #213047;
 }
+
+.navbar-inverse {
+  background: #17283e;
+  border-color: #17283e;
+}
+
+.panel {
+  border-radius: 10px;
+  box-shadow: 0 3px 16px rgba(24, 45, 70, 0.08);
+}
+
+.panel-primary { border-color: #d9e4ed; }
+.panel-primary > .panel-heading { background: #286d89; border-color: #286d89; }
+.radio-live { color: #1e9b70; }
+
+#ashuffle-settings {
+  border: 1px solid #d9e4ed;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+#ashuffle-settings legend { width: auto; padding: 0 8px; margin-bottom: 8px; }
+#ashuffle-settings summary { cursor: pointer; margin-bottom: 12px; font-weight: 600; }
 
 .starter-template {
   padding: 40px 15px;

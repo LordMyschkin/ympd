@@ -362,72 +362,7 @@ function webSocketConnect() {
                     )
                         $('#next').removeClass('hide');
                     if (pagination > 0) $('#prev').removeClass('hide');
-                    if (isTouch) {
-                        $(
-                            '#salamisandwich > tbody > tr > td:last-child'
-                        ).append(
-                            '<a class="pull-right btn-group-hover" href="#/" ' +
-                                'onclick="trash($(this).parents(\'tr\'));">' +
-                                '<span class="glyphicon glyphicon-trash"></span></a>'
-                        );
-                    } else {
-                        $('#salamisandwich > tbody > tr').on({
-                            mouseover: function () {
-                                var doomed = $(this);
-                                if ($('#btntrashmodeup').hasClass('active'))
-                                    doomed = $(
-                                        '#salamisandwich > tbody > tr:lt(' +
-                                            ($(this).index() + 1) +
-                                            ')'
-                                    );
-                                if ($('#btntrashmodedown').hasClass('active'))
-                                    doomed = $(
-                                        '#salamisandwich > tbody > tr:gt(' +
-                                            ($(this).index() - 1) +
-                                            ')'
-                                    );
-                                $.each(doomed, function () {
-                                    if (
-                                        $(this).children().last().has('a')
-                                            .length == 0
-                                    )
-                                        $(this)
-                                            .children()
-                                            .last()
-                                            .append(
-                                                '<a class="pull-right btn-group-hover" href="#/" ' +
-                                                    'onclick="trash($(this).parents(\'tr\'));">' +
-                                                    '<span class="glyphicon glyphicon-trash"></span></a>'
-                                            )
-                                            .find('a')
-                                            .fadeTo('fast', 1);
-                                });
-                            },
-                            mouseleave: function () {
-                                var doomed = $(this);
-                                if ($('#btntrashmodeup').hasClass('active'))
-                                    doomed = $(
-                                        '#salamisandwich > tbody > tr:lt(' +
-                                            ($(this).index() + 1) +
-                                            ')'
-                                    );
-                                if ($('#btntrashmodedown').hasClass('active'))
-                                    doomed = $(
-                                        '#salamisandwich > tbody > tr:gt(' +
-                                            ($(this).index() - 1) +
-                                            ')'
-                                    );
-                                $.each(doomed, function () {
-                                    $(this)
-                                        .children()
-                                        .last()
-                                        .find('a')
-                                        .stop()
-                                        .remove();
-                                });
-                            },
-                        });
-                    }
+                    // Queue deletion controls are disabled for continuous radio.
 
                     $('#salamisandwich > tbody > tr').on({
                         click: function () {
@@ -924,6 +859,25 @@ function webSocketConnect() {
                     if (obj.data.passwort_set)
                         $('#mpd_password_set').removeClass('hide');
                     break;
+                case 'ashuffle':
+                    var radio = obj.data;
+                    $('#ashuffle-enabled').val(String(radio.enabled));
+                    $('#ashuffle-mode').val(radio.mode);
+                    $('#ashuffle-buffer').val(radio.buffer);
+                    $('#ashuffle-groups').val(radio.group_tags);
+                    $('#ashuffle-file').val(radio.file);
+                    $('#ashuffle-exclude').val(radio.exclude_from);
+                    $('#ashuffle-rules').val(radio.exclude_rules);
+                    $('#ashuffle-no-check').prop('checked', !!radio.no_check);
+                    $('#ashuffle-only').val(radio.only);
+                    $('#ashuffle-window').val(radio.window_size);
+                    $('#ashuffle-reconnect').val(radio.reconnect_timeout);
+                    $('#ashuffle-suspend').val(radio.suspend_timeout);
+                    $('#ashuffle-startup').prop('checked', !!radio.play_on_startup);
+                    $('#ashuffle-db-update').prop('checked', !!radio.exit_on_db_update);
+                    $('#ashuffle-log').val(radio.log_file);
+                    $('#ashuffle-status').text(radio.running ? 'Ashuffle is running' : radio.status);
+                    break;
 
                 case 'authorized':
                     if (obj.data === 'true') {
@@ -1013,32 +967,7 @@ var updateVolumeIcon = function (volume) {
 };
 
 var updatePlayIcon = function (state) {
-    $('#play-icon')
-        .removeClass('glyphicon-play')
-        .removeClass('glyphicon-pause');
-    $('#track-icon')
-        .removeClass('glyphicon-play')
-        .removeClass('glyphicon-pause')
-        .removeClass('glyphicon-stop');
-
-    if (state == 1) {
-        // stop
-        $('#play-icon').addClass('glyphicon-play');
-        $('#track-icon').addClass('glyphicon-stop');
-        document.getElementById('player').pause();
-    } else if (state == 2) {
-        // play
-        $('#play-icon').addClass('glyphicon-pause');
-        $('#track-icon').addClass('glyphicon-play');
-        if ($.cookie('autoplay') === 'true' && player.paused) {
-            clickLocalPlay();
-        }
-    } else {
-        // pause
-        $('#play-icon').addClass('glyphicon-play');
-        $('#track-icon').addClass('glyphicon-pause');
-        document.getElementById('player').pause();
-    }
+    $('#track-icon').toggleClass('radio-live', state == 2);
 };
 
 var updatePageTitle = function (songInfo) {
@@ -1065,9 +994,7 @@ function updateDB() {
 }
 
 function clickPlay() {
-    if ($('#track-icon').hasClass('glyphicon-stop'))
-        socket.send('MPD_API_SET_PLAY');
-    else socket.send('MPD_API_SET_PAUSE');
+    // Playback is managed by the radio loop.
 }
 
 function clickLocalPlay() {
@@ -1226,6 +1153,7 @@ $('#btnautoplay').on('click', function (e) {
 
 function getHost() {
     socket.send('MPD_API_GET_MPDHOST');
+    socket.send('MPD_API_GET_ASHUFFLE');
 
     function onEnter(event) {
         if (event.which == 13) {
@@ -1287,6 +1215,34 @@ function saveQueue() {
 }
 
 function confirmSettings() {
+    var radio = {
+        enabled: $('#ashuffle-enabled').val(),
+        mode: $('#ashuffle-mode').val(),
+        buffer: $('#ashuffle-buffer').val(),
+        group_tags: $('#ashuffle-groups').val(),
+        file: $('#ashuffle-file').val(),
+        exclude_from: $('#ashuffle-exclude').val(),
+        exclude_rules: $('#ashuffle-rules').val(),
+        no_check: $('#ashuffle-no-check').is(':checked') ? 1 : 0,
+        only: $('#ashuffle-only').val(),
+        window_size: $('#ashuffle-window').val(),
+        reconnect_timeout: $('#ashuffle-reconnect').val(),
+        suspend_timeout: $('#ashuffle-suspend').val(),
+        play_on_startup: $('#ashuffle-startup').is(':checked') ? 1 : 0,
+        exit_on_db_update: $('#ashuffle-db-update').is(':checked') ? 1 : 0,
+        log_file: $('#ashuffle-log').val(),
+    };
+    if (radio.mode === 'groups' && !radio.group_tags.trim()) {
+        $('#ashuffle-status').text('Enter at least one group tag.');
+        return;
+    }
+    if (radio.no_check && !radio.file.trim()) {
+        $('#ashuffle-status').text('Skip URI checks requires a URI list file.');
+        return;
+    }
+    socket.send('MPD_API_SET_ASHUFFLE,' + $.map(radio, function (value, key) {
+        return key + '=' + encodeURIComponent(value);
+    }).join('&'));
     if ($('#mpd_pw').val().length + $('#mpd_pw_con').val().length > 0) {
         if ($('#mpd_pw').val() !== $('#mpd_pw_con').val()) {
             $('#mpd_pw_con').popover('show');
@@ -1357,9 +1313,6 @@ $(document).keydown(function (e) {
             break;
         case 39: //right
             socket.send('MPD_API_SET_NEXT');
-            break;
-        case 32: //space
-            clickPlay();
             break;
         default:
             return;

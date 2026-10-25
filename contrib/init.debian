@@ -23,9 +23,9 @@ LOG_ERR=/var/log/$NAME.err
 YMPD_USER=nobody
 MPD_HOST=localhost
 MPD_PORT=6600
-WEB_PORT=8080
+WEB_PORT=6080
 #DIGEST=--digest /path/to/htdigest
-#LOCALPORT=8080
+#LOCALPORT=6080
 
 
 # Exit if the package is not installed

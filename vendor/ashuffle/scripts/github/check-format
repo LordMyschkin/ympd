@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+. "scripts/github/common.sh"
+
+setup "$(uname -m)"
+
+exec env \
+    CLANG_FORMAT="${CLANG_FORMAT}" \
+    TO_CHECK=all \
+scripts/check-format

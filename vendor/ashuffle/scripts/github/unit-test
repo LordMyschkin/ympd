@@ -1,0 +1,37 @@
+#!/bin/bash
+
+BUILD_ROOT=build
+
+. "scripts/github/common.sh"
+
+# Set the mode to the environment variable SANITIZER if set, otherwise,
+# use "default"
+SANITIZER="${SANITIZER:-none}"
+if test "$#" -gt 0; then
+    case $1 in
+        asan)
+            SANITIZER=asan
+            ;;
+        *)
+            die "unrecognized mode $1"
+    esac
+fi
+
+setup "$(uname -m)"
+
+echo "Running with sanitizer ${SANITIZER}"
+case "${SANITIZER}" in
+    none)
+        env CC="${CLANG_CC}" CXX="${CLANG_CXX}" meson -Dtests=enabled "${BUILD_ROOT}" \
+        || die "couldn't run meson with sanitizer ${SANITIZER}"
+        ;;
+    asan)
+        env CC="${CLANG_CC}" CXX="${CLANG_CXX}" LDFLAGS="-fsanitize=address" \
+            meson -Dtests=enabled -Db_sanitize=address -Db_lundef=false "${BUILD_ROOT}" \
+            || die "couldn't run meson with sanitizer ${SANITIZER}"
+        ;;
+    *)
+        die "unrecognized sanitizer ${SANITIZER}"
+esac
+
+exec ninja -C "${BUILD_ROOT}" test

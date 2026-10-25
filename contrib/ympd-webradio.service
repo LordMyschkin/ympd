@@ -1,0 +1,25 @@
+[Unit]
+Description=ympd Webradio (bundled Ashuffle)
+Documentation=man:ympd(1)
+Requires=mpd.service
+After=mpd.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=ympd-webradio
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/ympd-webradio
+Environment=YMPD_ASHUFFLE_CONFIG_DIR=/var/lib/ympd-webradio
+ExecStart=/usr/local/bin/ympd --host 127.0.0.1 --port 6600 --webport 127.0.0.1:6080
+Restart=on-failure
+RestartSec=5s
+KillMode=control-group
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

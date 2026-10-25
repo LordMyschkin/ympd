@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "ashuffle_control.h"
 #include "json_encode.h"
 
 /* forward declaration */
@@ -74,7 +75,8 @@ int callback_mpd(struct mg_connection *c) {
         return MG_TRUE;
 
     if (mpd.conn_state != MPD_CONNECTED && cmd_id != MPD_API_SET_MPDHOST &&
-        cmd_id != MPD_API_GET_MPDHOST && cmd_id != MPD_API_SET_MPDPASS)
+        cmd_id != MPD_API_GET_MPDHOST && cmd_id != MPD_API_SET_MPDPASS &&
+        cmd_id != MPD_API_GET_ASHUFFLE && cmd_id != MPD_API_SET_ASHUFFLE)
         return MG_TRUE;
 
     switch (cmd_id) {
@@ -89,7 +91,7 @@ int callback_mpd(struct mg_connection *c) {
             free(p_charbuf);
             p_charbuf = strdup(c->content);
             s->auth_token = strdup(get_arg1(p_charbuf));
-            if (!strcmp(mpd.wss_auth_token, s->auth_token))
+            if (mpd.wss_auth_token && !strcmp(mpd.wss_auth_token, s->auth_token))
                 s->authorized = 1;
 
             n = snprintf(mpd.buf, MAX_SIZE, "{\"type\":\"authorized\", \"data\":\"%s\"}",
@@ -101,7 +103,7 @@ int callback_mpd(struct mg_connection *c) {
             mpd_run_update(mpd.conn, NULL);
             break;
         case MPD_API_SET_PAUSE:
-            mpd_run_toggle_pause(mpd.conn);
+            if (!ashuffle_enabled()) mpd_run_toggle_pause(mpd.conn);
             break;
         case MPD_API_SET_PREV:
             mpd_run_previous(mpd.conn);
@@ -113,10 +115,23 @@ int callback_mpd(struct mg_connection *c) {
             mpd_run_play(mpd.conn);
             break;
         case MPD_API_SET_STOP:
-            mpd_run_stop(mpd.conn);
+            if (!ashuffle_enabled()) mpd_run_stop(mpd.conn);
             break;
+        case MPD_API_GET_ASHUFFLE:
+            n = ashuffle_status_json(mpd.buf, MAX_SIZE);
+            break;
+        case MPD_API_SET_ASHUFFLE: {
+            char error[128] = "";
+            const char *query = strchr(c->content, ',');
+            if (!query || !ashuffle_apply_query(query + 1, error, sizeof(error)))
+                n = snprintf(mpd.buf, MAX_SIZE, "{\"type\":\"error\",\"data\":\"%s\"}",
+                             *error ? error : "Missing Ashuffle settings");
+            else
+                n = ashuffle_status_json(mpd.buf, MAX_SIZE);
+            break;
+        }
         case MPD_API_RM_ALL:
-            mpd_run_clear(mpd.conn);
+            if (!ashuffle_enabled()) mpd_run_clear(mpd.conn);
             break;
         case MPD_API_RM_TRACK:
             if (sscanf(c->content, "MPD_API_RM_TRACK,%u", &uint_buf))
@@ -138,11 +153,11 @@ int callback_mpd(struct mg_connection *c) {
                 mpd_run_play_id(mpd.conn, uint_buf);
             break;
         case MPD_API_TOGGLE_RANDOM:
-            if (sscanf(c->content, "MPD_API_TOGGLE_RANDOM,%u", &uint_buf))
+            if (!ashuffle_enabled() && sscanf(c->content, "MPD_API_TOGGLE_RANDOM,%u", &uint_buf))
                 mpd_run_random(mpd.conn, uint_buf);
             break;
         case MPD_API_TOGGLE_REPEAT:
-            if (sscanf(c->content, "MPD_API_TOGGLE_REPEAT,%u", &uint_buf))
+            if (!ashuffle_enabled() && sscanf(c->content, "MPD_API_TOGGLE_REPEAT,%u", &uint_buf))
                 mpd_run_repeat(mpd.conn, uint_buf);
             break;
         case MPD_API_TOGGLE_CONSUME:
@@ -150,7 +165,7 @@ int callback_mpd(struct mg_connection *c) {
                 mpd_run_consume(mpd.conn, uint_buf);
             break;
         case MPD_API_TOGGLE_SINGLE:
-            if (sscanf(c->content, "MPD_API_TOGGLE_SINGLE,%u", &uint_buf))
+            if (!ashuffle_enabled() && sscanf(c->content, "MPD_API_TOGGLE_SINGLE,%u", &uint_buf))
                 mpd_run_single(mpd.conn, uint_buf);
             break;
         case MPD_API_TOGGLE_CROSSFADE:
@@ -312,6 +327,7 @@ int callback_mpd(struct mg_connection *c) {
             strncpy(mpd.host, token, sizeof(mpd.host));
             mpd.port = int_buf;
             mpd.conn_state = MPD_RECONNECT;
+            ashuffle_restart();
             free(p_charbuf);
             return MG_TRUE;
         out_host_change:
@@ -337,6 +353,7 @@ int callback_mpd(struct mg_connection *c) {
 
             mpd.password = strdup(token);
             mpd.conn_state = MPD_RECONNECT;
+            ashuffle_restart();
             free(p_charbuf);
             return MG_TRUE;
         out_set_pass:
@@ -453,6 +470,11 @@ void mpd_poll(struct mg_server *s) {
             fprintf(stderr, "MPD connected.\n");
             mpd_connection_set_timeout(mpd.conn, 10000);
             mpd.conn_state = MPD_CONNECTED;
+            if (ashuffle_enabled()) {
+                mpd_run_random(mpd.conn, 0);
+                mpd_run_repeat(mpd.conn, 0);
+                mpd_run_single(mpd.conn, 0);
+            }
             /* write outputs */
             mpd.buf_size = mpd_put_outputs(mpd.buf, 1);
             for (struct mg_connection *c = mg_next(s, NULL); c != NULL; c = mg_next(s, c)) {

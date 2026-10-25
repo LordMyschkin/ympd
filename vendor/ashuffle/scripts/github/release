@@ -1,0 +1,61 @@
+#!/bin/bash
+
+set -euo pipefail
+
+. "scripts/github/common.sh"
+
+assure_format() {
+    local f="$1"
+    local match="$2"
+
+    if ! [[ -e "$f" ]]; then
+        die "cannot check format of '$f' file does not exist"
+    fi
+
+    local arch="$(readelf -h "$f" | sed -En 's/\s+Machine:\s+(\S.*)$/\1/p')"
+    if [[ $? -ne 0 ]]; then
+        die "failed to fetch ELF machine of file '$f'"
+    fi
+
+    [[ "$arch" =~ "$match" ]]
+    local status=$?
+    if [[ $status -eq 1 ]]; then
+        die "mismatched machine for $f. Got '$arch' wanted $match'" >&2
+    fi
+    return 0
+}
+
+OUT="$1"
+ARCH="$2"
+
+build_meta
+setup "${ARCH}"
+
+cross_args=()
+check_arch=""
+case "${ARCH}" in
+    x86_64)
+        check_arch="X86-64"
+        ;;
+    aarch64)
+        check_arch="AArch64"
+        cross_args=(
+            --cross_cc="${CLANG_CC}"
+            --cross_cxx="${CLANG_CXX}"
+        )
+        ;;
+    arm*)
+        check_arch="ARM"
+        cross_args=(
+            --cross_cc="${CLANG_CC}"
+            --cross_cxx="${CLANG_CXX}"
+        )
+        ;;
+    *)
+        die "unrecognized arch ${ARCH}"
+        ;;
+esac
+
+"${RUNNER_TEMP}/meta" release -o "${OUT}" "${cross_args[@]}" "${ARCH}"
+
+assure_format "${OUT}" "${check_arch}"

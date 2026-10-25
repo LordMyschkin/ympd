@@ -71,6 +71,8 @@
     X(MPD_API_TOGGLE_SINGLE)    \
     X(MPD_API_TOGGLE_CROSSFADE) \
     X(MPD_API_TOGGLE_REPEAT)    \
+    X(MPD_API_GET_ASHUFFLE)      \
+    X(MPD_API_SET_ASHUFFLE)      \
     X(MPD_API_AUTHORIZE)
 
 enum mpd_cmd_ids { MPD_CMDS(GEN_ENUM) };

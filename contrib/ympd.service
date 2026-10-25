@@ -26,7 +26,7 @@ ProtectHome=yes
 Environment=MPD_HOST=localhost
 Environment=MPD_PORT=6600
 Environment=MPD_PASSWORD=
-Environment=WEB_PORT=8080
+Environment=WEB_PORT=6080
 Environment=YMPD_USER=nobody
 Environment=DIGEST=
 Environment=LOCALPORT=
