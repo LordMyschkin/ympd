@@ -191,6 +191,12 @@ $(document).ready(function () {
             .addClass('glyphicon-play');
     });
 
+    document.getElementById('player').addEventListener('play', function () {
+        $('#localplay-icon')
+            .removeClass('glyphicon-play')
+            .addClass('glyphicon-pause');
+    });
+
     document.getElementById('player').addEventListener(
         'error',
         function failed(e) {
@@ -878,6 +884,7 @@ function webSocketConnect() {
                 case 'authorized':
                     if (obj.data === 'true') {
                         socket.send('MPD_API_GET_CHANNELS');
+                        socket.send('MPD_API_GET_MPDHOST');
                     } else webSocketAuthenticate();
 
                     break;
@@ -987,35 +994,34 @@ function updateDB() {
         .show();
 }
 
-function clickPlay() {
-    // Playback is managed by the radio loop.
-}
-
 function clickLocalPlay() {
     var player = document.getElementById('player');
-    $('#localplay-icon')
-        .removeClass('glyphicon-play')
-        .removeClass('glyphicon-pause');
-
-    if (!$('#track-icon').hasClass('glyphicon-play')) {
-        clickPlay();
-    }
 
     if (player.paused) {
         var mpdstream = $.cookie('mpdstream');
 
         if (mpdstream) {
+            if (window.location.protocol === 'https:' && /^http:\/\//i.test(mpdstream)) {
+                $('.top-right').notify({
+                    message: { text: 'Use an HTTPS stream URL in Settings (normally /mpd-stream/).' },
+                    type: 'danger',
+                }).show();
+                return;
+            }
             player.src = mpdstream;
-            console.log('playing mpd stream: ' + player.src);
             player.load();
-            player.play();
-            $('#localplay-icon').addClass('glyphicon-pause');
+            var playback = player.play();
+            if (playback && typeof playback.catch === 'function') {
+                playback.catch(function () {
+                    $('#localplay-icon')
+                        .removeClass('glyphicon-pause')
+                        .addClass('glyphicon-play');
+                });
+            }
         } else {
-            $('#mpdstream').change(function () {
+            $('#mpdstream').one('change', function () {
                 clickLocalPlay();
-                $(this).unbind('change');
             });
-            $('#localplay-icon').addClass('glyphicon-play');
             getHost();
         }
     } else {
@@ -1026,7 +1032,11 @@ function clickLocalPlay() {
 function setLocalStream(mpdhost) {
     var mpdstream = $.cookie('mpdstream');
 
-    if (!mpdstream) {
+    if (window.location.protocol === 'https:' &&
+        (!mpdstream || /^http:\/\//i.test(mpdstream))) {
+        mpdstream = '/mpd-stream/';
+        $.cookie('mpdstream', mpdstream, { expires: 424242 });
+    } else if (!mpdstream) {
         mpdstream = 'http://';
         if (mpdhost == '127.0.0.1') mpdstream += window.location.hostname;
         else mpdstream += mpdhost;

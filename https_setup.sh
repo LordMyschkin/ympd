@@ -163,7 +163,12 @@ ${domain} {
     basicauth {
         ${auth_user} ${password_hash}
     }
-    reverse_proxy 127.0.0.1:6080
+    handle_path /mpd-stream/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle {
+        reverse_proxy 127.0.0.1:6080
+    }
 }
 EOF
 unset password_hash
@@ -176,4 +181,5 @@ systemctl is-active --quiet caddy.service ||
 
 printf '\nCaddy eingerichtet: https://%s/\n' "$domain"
 printf 'Nach der Zertifikatsausstellung prüfen: curl -I https://%s/ (erwartet: HTTP 401).\n' "$domain"
+printf 'Browser-Stream: MPD-httpd-Output auf 127.0.0.1:8000 benötigt; siehe README.md.\n'
 printf 'Bei Zertifikatsproblemen: journalctl -u caddy.service -b prüfen.\n'

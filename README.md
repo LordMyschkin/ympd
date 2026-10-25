@@ -126,6 +126,35 @@ und 443 in Firewall beziehungsweise VPS-Panel erlauben. Port 80 dient nur
 der Zertifikatsausstellung und der Weiterleitung auf HTTPS. Extern wird die
 Oberfläche unter `https://musik.example.org/` aufgerufen.
 
+### MPD-Stream im Browser
+
+Der Play-Button oben rechts spielt den Stream **nur in diesem Browser** ab;
+MPD und Ashuffle auf dem Server laufen weiter. Dafür muss MPD einen
+`httpd`-Audio-Output bereitstellen. Wenn der vorhandene Stream bereits unter
+`127.0.0.1:8000` erreichbar ist, ist keine Änderung an MPD nötig.
+Andernfalls beispielsweise in `/etc/mpd.conf` ergänzen:
+
+```conf
+audio_output {
+    type "httpd"
+    name "Browser stream"
+    encoder "lame"
+    port "8000"
+    bind_to_address "127.0.0.1"
+    bitrate "192"
+    format "44100:16:2"
+}
+```
+
+Anschließend `sudo systemctl restart mpd.service` ausführen und mit
+`mpc outputs` prüfen, ob der Output aktiviert ist. Der Reverse Proxy leitet
+`/mpd-stream/` geschützt und verschlüsselt an diesen lokalen Port weiter.
+In **Settings → MPD Stream URL** steht bei HTTPS standardmäßig
+`/mpd-stream/`. Einen früher gespeicherten `http://...:8000/`-Wert ersetzt
+die Oberfläche beim nächsten Laden automatisch. Falls dein MPD-Stream auf
+einem anderen Port liegt, den Port in der passenden Proxy-Konfiguration
+anpassen. Port 8000 selbst nicht öffentlich freigeben.
+
 Nach einer bereits abgeschlossenen Grundinstallation kann die automatische
 Erkennung separat gestartet werden:
 
@@ -189,6 +218,8 @@ endgültige Konfiguration ersetzen:
     SSLCertificateFile /etc/letsencrypt/live/musik.example.org/fullchain.pem
     SSLCertificateKeyFile /etc/letsencrypt/live/musik.example.org/privkey.pem
     ProxyRequests Off
+    ProxyPass "/mpd-stream/" "http://127.0.0.1:8000/"
+    ProxyPassReverse "/mpd-stream/" "http://127.0.0.1:8000/"
     ProxyPass "/" "http://127.0.0.1:6080/" upgrade=websocket
     ProxyPassReverse "/" "http://127.0.0.1:6080/"
     <Location "/">
@@ -262,6 +293,12 @@ server {
     auth_basic "ympd-webradio";
     auth_basic_user_file /etc/nginx/ympd-webradio.htpasswd;
 
+    location /mpd-stream/ {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:6080;
         proxy_http_version 1.1;
@@ -314,7 +351,12 @@ musik.example.org {
     basicauth {
         ympd HIER_DEN_PASSWORT_HASH_EINTRAGEN
     }
-    reverse_proxy 127.0.0.1:6080
+    handle_path /mpd-stream/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle {
+        reverse_proxy 127.0.0.1:6080
+    }
 }
 ```
 

@@ -81,8 +81,18 @@
                 <span class="glyphicon glyphicon-forward"></span>
               </button>
             </div>
-            <!-- Local browser playback could be paused; omit its controls in radio mode. -->
-            <audio id="player" preload="none" hidden></audio>
+            <div class="btn-group" role="group">
+              <button
+                type="button"
+                class="btn btn-default"
+                onclick="clickLocalPlay();"
+                title="Play the MPD stream in this browser"
+                aria-label="Play the MPD stream in this browser"
+              >
+                <span id="localplay-icon" class="glyphicon glyphicon-play"></span>
+              </button>
+              <audio id="player" preload="none" hidden></audio>
+            </div>
             <div class="btn-group" role="group" id="volume-group">
               <div class="btn btn-toolbar btn-default">
                 <span
@@ -366,7 +376,7 @@
                 </div>
               </div>
             </form>
-            <!-- Browser playback has a pause control and is omitted for continuous radio. -->
+            <p class="help-block">The browser playback button above plays the MPD stream locally. It does not stop the radio on the server.</p>
             <hr />
             <fieldset id="ashuffle-settings">
               <legend>Ashuffle Radio</legend>
