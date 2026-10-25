@@ -547,6 +547,11 @@ char *mpd_get_artist(struct mpd_song const *song) {
     return str;
 }
 
+static const char *mpd_get_composer(struct mpd_song const *song) {
+    const char *composer = mpd_song_get_tag(song, MPD_TAG_COMPOSER, 0);
+    return composer != NULL ? composer : "";
+}
+
 char *mpd_get_year(struct mpd_song const *song) {
     char *str;
 
@@ -664,6 +669,8 @@ int mpd_put_current_song(char *buffer) {
     cur += json_emit_quoted_str(cur, end - cur, mpd_get_artist(song));
     cur += json_emit_raw_str(cur, end - cur, ",\"album\":");
     cur += json_emit_quoted_str(cur, end - cur, mpd_get_album(song));
+    cur += json_emit_raw_str(cur, end - cur, ",\"composer\":");
+    cur += json_emit_quoted_str(cur, end - cur, mpd_get_composer(song));
 
     cur += json_emit_raw_str(cur, end - cur, "}}");
     mpd_song_free(song);
@@ -703,10 +710,8 @@ int mpd_put_queue(char *buffer, unsigned int offset) {
             cur += json_emit_quoted_str(cur, end - cur, mpd_get_album(song));
             cur += json_emit_raw_str(cur, end - cur, ",\"title\":");
             cur += json_emit_quoted_str(cur, end - cur, mpd_get_title(song));
-            cur += json_emit_raw_str(cur, end - cur, ",\"artist\":");
-            cur += json_emit_quoted_str(cur, end - cur, mpd_get_artist(song));
-            cur += json_emit_raw_str(cur, end - cur, ",\"album\":");
-            cur += json_emit_quoted_str(cur, end - cur, mpd_get_album(song));
+            cur += json_emit_raw_str(cur, end - cur, ",\"composer\":");
+            cur += json_emit_quoted_str(cur, end - cur, mpd_get_composer(song));
             cur += json_emit_raw_str(cur, end - cur, "},");
 
             totalTime += drtn;
@@ -767,6 +772,8 @@ int mpd_put_browse(char *buffer, char *path, unsigned int offset) {
                 cur += json_emit_int(cur, end - cur, mpd_song_get_duration(song));
                 cur += json_emit_raw_str(cur, end - cur, ",\"title\":");
                 cur += json_emit_quoted_str(cur, end - cur, mpd_get_title(song));
+                cur += json_emit_raw_str(cur, end - cur, ",\"composer\":");
+                cur += json_emit_quoted_str(cur, end - cur, mpd_get_composer(song));
                 cur += json_emit_raw_str(cur, end - cur, "},");
                 break;
 
@@ -828,10 +835,8 @@ int mpd_search(char *buffer, char *searchstr) {
             cur += json_emit_int(cur, end - cur, mpd_song_get_duration(song));
             cur += json_emit_raw_str(cur, end - cur, ",\"title\":");
             cur += json_emit_quoted_str(cur, end - cur, mpd_get_title(song));
-            cur += json_emit_raw_str(cur, end - cur, ",\"artist\":");
-            cur += json_emit_quoted_str(cur, end - cur, mpd_get_artist(song));
-            cur += json_emit_raw_str(cur, end - cur, ",\"album\":");
-            cur += json_emit_quoted_str(cur, end - cur, mpd_get_album(song));
+            cur += json_emit_raw_str(cur, end - cur, ",\"composer\":");
+            cur += json_emit_quoted_str(cur, end - cur, mpd_get_composer(song));
             cur += json_emit_raw_str(cur, end - cur, "},");
             mpd_song_free(song);
 

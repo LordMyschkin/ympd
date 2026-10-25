@@ -32,6 +32,12 @@ var filter = '';
 var scrobbler = '';
 var wss_auth_token = '';
 
+function composerMarkup(composer) {
+    if (!composer) return '';
+    return '<span class="song-composer">Composer: ' +
+        $('<div>').text(composer).html() + '</span>';
+}
+
 var app = $.sammy(function () {
     function runBrowse() {
         current_app = 'queue';
@@ -345,6 +351,7 @@ function webSocketConnect() {
                                 '</td>' +
                                 '<td>' +
                                 obj.data[song].title +
+                                composerMarkup(obj.data[song].composer) +
                                 '</td>' +
                                 '<td>' +
                                 minutes +
@@ -493,6 +500,7 @@ function webSocketConnect() {
                                         '</td>' +
                                         '<td>' +
                                         obj.data[item].title +
+                                        composerMarkup(obj.data[item].composer) +
                                         '</td>' +
                                         '<td>' +
                                         minutes +
@@ -822,6 +830,7 @@ function webSocketConnect() {
                     updatePageTitle(obj.data);
                     $('#album').text('');
                     $('#artist').text('');
+                    $('#composer').text('').addClass('hide');
 
                     $('#btnlove').removeClass('active');
 
@@ -837,12 +846,19 @@ function webSocketConnect() {
                         $('#album').text(obj.data.album);
                         notification += obj.data.album + '<br />';
                     }
+                    if (obj.data.composer) {
+                        $('#composer')
+                            .text('Composer: ' + obj.data.composer)
+                            .removeClass('hide');
+                        notification += composerMarkup(obj.data.composer);
+                    }
 
                     if ($.cookie('notification') === 'true')
                         songNotify(
                             obj.data.title,
                             obj.data.artist,
-                            obj.data.album
+                            obj.data.album,
+                            obj.data.composer
                         );
                     else
                         $('.top-right')
@@ -1270,7 +1286,7 @@ function notificationsSupported() {
     return 'Notification' in window;
 }
 
-function songNotify(title, artist, album) {
+function songNotify(title, artist, album, composer) {
     /*var opt = {
         type: "list",
         title: title,
@@ -1289,6 +1305,8 @@ function songNotify(title, artist, album) {
         textNotification += ' ' + artist;
     if (typeof album != 'undefined' && album.length > 0)
         textNotification += '\n ' + album;
+    if (composer)
+        textNotification += '\n Composer: ' + composer;
 
     var notification = new Notification(title, {
         icon: 'assets/favicon.ico',
