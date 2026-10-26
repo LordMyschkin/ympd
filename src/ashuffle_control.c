@@ -36,6 +36,8 @@ static char config_path[1024];
 static char status_message[128] = "Starting";
 static char ashuffle_binary[PATH_MAX];
 static int only_finished;
+static int restart_requested;
+static time_t stop_requested_at;
 
 static int number(const char *value, int min, int max, int *result) {
     char *end;
@@ -75,6 +77,7 @@ static int valid_config(const struct radio_config *c) {
     if (strcmp(c->mode, "songs") && strcmp(c->mode, "albums") && strcmp(c->mode, "groups")) return 0;
     if (!strcmp(c->mode, "groups") && !c->group_tags[0]) return 0;
     if (c->no_check && !c->file[0]) return 0;
+    if (c->no_check && strcmp(c->mode, "songs")) return 0;
     if (!strcmp(c->file, "-")) return 0; /* ympd has no URI stream on stdin. */
     if (!strcmp(c->mode, "groups")) {
         int found = 0, in_tag = 0;
@@ -214,9 +217,15 @@ load:
 }
 
 void ashuffle_restart(void) {
-    if (child > 0) kill(child, SIGTERM);
+    if (child > 0 && !restart_requested) {
+        restart_requested = 1;
+        stop_requested_at = time(NULL);
+        kill(child, SIGTERM);
+    }
     retry_at = 0;
     only_finished = 0;
+    snprintf(status_message, sizeof(status_message), "%s",
+             config.enabled ? "Restarting Ashuffle" : "Stopping Ashuffle");
 }
 
 static void start_child(void) {
@@ -298,16 +307,29 @@ static void start_child(void) {
 void ashuffle_tick(void) {
     if (child > 0) {
         int status;
-        if (waitpid(child, &status, WNOHANG) == child) {
+        pid_t result = waitpid(child, &status, WNOHANG);
+        if (result == child || (result < 0 && errno == ECHILD)) {
+            int expected_stop = restart_requested || !config.enabled;
             child = -1;
-            if ((config.only || config.exit_on_db_update) && WIFEXITED(status) && WEXITSTATUS(status) == 0)
+            restart_requested = 0;
+            if (!expected_stop && result > 0 &&
+                (config.only || config.exit_on_db_update) &&
+                WIFEXITED(status) && WEXITSTATUS(status) == 0)
                 only_finished = 1;
-            snprintf(status_message, sizeof(status_message), "Ashuffle exited (status %d); see server log",
-                     WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+            if (expected_stop)
+                snprintf(status_message, sizeof(status_message), "%s",
+                         config.enabled ? "Restarting Ashuffle" : "Ashuffle stopped");
+            else
+                snprintf(status_message, sizeof(status_message),
+                         "Ashuffle exited (status %d); see server log",
+                         result > 0 && WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        } else if (restart_requested && time(NULL) - stop_requested_at >= 3) {
+            /* Do not let an unresponsive old process block the new settings. */
+            kill(child, SIGKILL);
         }
     }
     if (!config.enabled) {
-        if (child > 0) kill(child, SIGTERM);
+        if (child > 0 && !restart_requested) ashuffle_restart();
         return;
     }
     if (child < 0 && !only_finished && time(NULL) >= retry_at && mpd.conn_state == MPD_CONNECTED)
@@ -363,7 +385,7 @@ size_t ashuffle_status_json(char *out, size_t size) {
     INT(play_on_startup); INT(exit_on_db_update);
     STR(mode); STR(group_tags); STR(file); STR(exclude_from); STR(exclude_rules); STR(log_file);
     STR(reconnect_timeout); STR(suspend_timeout);
-    RAW("\"running\":"); RAW(child > 0 ? "true" : "false"); RAW(",\"status\":");
+    RAW("\"running\":"); RAW(child > 0 && !restart_requested ? "true" : "false"); RAW(",\"status\":");
     cur += json_emit_quoted_str(cur, (int)left, status_message);
     left = size - (size_t)(cur - out);
     RAW("}}");

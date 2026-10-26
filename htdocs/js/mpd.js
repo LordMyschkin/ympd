@@ -855,9 +855,9 @@ function webSocketConnect() {
                             .show();
                     break;
                 case 'mpdhost':
-                    $('#mpdhost').val(obj.data.host);
+                    $('#mpdhost').val(obj.data.host).data('original', obj.data.host);
                     setLocalStream(obj.data.host);
-                    $('#mpdport').val(obj.data.port);
+                    $('#mpdport').val(obj.data.port).data('original', String(obj.data.port));
                     if (obj.data.passwort_set)
                         $('#mpd_password_set').removeClass('hide');
                     break;
@@ -1234,6 +1234,10 @@ function confirmSettings() {
         $('#ashuffle-status').text('Skip URI checks requires a URI list file.');
         return;
     }
+    if (radio.no_check && radio.mode !== 'songs') {
+        $('#ashuffle-status').text('Skip URI checks requires individual songs.');
+        return;
+    }
     socket.send('MPD_API_SET_ASHUFFLE,' + $.map(radio, function (value, key) {
         return key + '=' + encodeURIComponent(value);
     }).join('&'));
@@ -1246,9 +1250,12 @@ function confirmSettings() {
             return;
         } else socket.send('MPD_API_SET_MPDPASS,' + $('#mpd_pw').val());
     }
-    socket.send(
-        'MPD_API_SET_MPDHOST,' + $('#mpdport').val() + ',' + $('#mpdhost').val()
-    );
+    if ($('#mpdhost').val() !== $('#mpdhost').data('original') ||
+        $('#mpdport').val() !== $('#mpdport').data('original')) {
+        socket.send(
+            'MPD_API_SET_MPDHOST,' + $('#mpdport').val() + ',' + $('#mpdhost').val()
+        );
+    }
     $.cookie('mpdstream', $('#mpdstream').val(), { expires: 424242 });
     $('#settings').modal('hide');
 }
